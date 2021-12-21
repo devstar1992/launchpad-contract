@@ -40,6 +40,9 @@ contract IDO is Ownable {
   event LogPoolExtraData(address pool, bytes32 indexed _extraData);
   event LogDeposit(address pool, address indexed participant, uint256 amount);
   event LogPoolStatusChanged(address pool, uint256 status);  
+  event LogFeeChanged(uint256 poolFixedFee, uint8 poolPercentFee);  
+  event LogPoolRemoved(address pool);  
+  event LogAddressWhitelisted(address pool, address[] whitelistedAddresses);
 
   modifier _feeEnough() {
     require(
@@ -102,6 +105,7 @@ contract IDO is Ownable {
   {
     poolFixedFee=_poolFixedFee;
     poolPercentFee=_poolPercentFee;
+    emit LogFeeChanged(poolFixedFee, poolPercentFee);
   }
 
   function removePool(address pool)
@@ -117,6 +121,7 @@ contract IDO is Ownable {
         break;
       }
     }
+    emit LogPoolRemoved(pool);
   }
 
   function updateExtraData(address _pool, bytes32 _extraData)
@@ -141,6 +146,7 @@ contract IDO is Ownable {
     _onlyPoolOwner(_pool, msg.sender)
   {
     IPool(_pool).addAddressesToWhitelist(whitelistedAddresses); 
+    emit LogAddressWhitelisted(_pool, whitelistedAddresses);
   }
 
   function deposit(address _pool)
@@ -151,12 +157,26 @@ contract IDO is Ownable {
     emit LogDeposit(_pool, msg.sender, msg.value);
   }
 
+  function startPool(address _pool)
+    external
+    onlyOwner()
+  {
+    IPool(_pool).startPool(); 
+    emit LogPoolStatusChanged(_pool, uint(IPool.PoolStatus.Inprogress));
+  }
   function cancelPool(address _pool)
     external
     _onlyPoolOwner(_pool, msg.sender)
   {
     IPool(_pool).cancelPool(); 
     emit LogPoolStatusChanged(_pool, uint(IPool.PoolStatus.Cancelled));
+  }
+
+  function refundPool(address _pool)
+    external
+    onlyOwner()
+  {
+    IPool(_pool).refundPool(); 
   }
 
   function endPool(address _pool)

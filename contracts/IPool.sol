@@ -53,7 +53,9 @@ interface IPool {
   function addAddressesToWhitelist(address[] calldata whitelistedAddresses) external;
 
   function deposit(address sender) external payable;
+  function startPool() external;
   function cancelPool() external;
+  function refundPool() external;
   function endPool() external;
   function addLiquidityDex() external;
 

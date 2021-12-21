@@ -63,6 +63,14 @@ contract Pool is IPool, Whitelist {
     _;
   }
 
+  modifier _poolIsReadyStart(PoolModel storage _pool, PoolDetails storage _poolDetails) {
+    require(
+      _poolDetails.startDateTime <= block.timestamp && _pool.status!= IPool.PoolStatus.Cancelled && _pool.status!= IPool.PoolStatus.Ended && _pool.status!= IPool.PoolStatus.Finished,
+      "not started!"
+    );
+    _;
+  }
+
   modifier _poolIsReadyEnd(PoolModel storage _pool, PoolDetails storage _poolDetails) {
     require(
       _poolDetails.endDateTime <= block.timestamp && _pool.status!= IPool.PoolStatus.Ended && _pool.status!= IPool.PoolStatus.Cancelled,
@@ -150,6 +158,16 @@ contract Pool is IPool, Whitelist {
     emit LogDeposit(msg.sender, _amount);
   }
 
+  function startPool()
+    external
+    override
+    _onlyFactory
+    _poolIsReadyStart(poolInformation, poolDetails)    
+  {    
+    poolInformation.status=PoolStatus.Inprogress;
+    emit LogPoolStatusChanged(uint(PoolStatus.Inprogress));
+  }
+
   function cancelPool()
     external
     override
@@ -165,6 +183,29 @@ contract Pool is IPool, Whitelist {
     emit LogPoolStatusChanged(uint(PoolStatus.Cancelled));
   }
 
+  function refundPool()
+    external
+    override
+    _onlyFactory
+    _poolIsReadyEnd(poolInformation, poolDetails)    
+  {
+    projectToken = IERC20Metadata(poolInformation.projectTokenAddress);
+    //distribute the token
+    uint count=0;
+    for(uint i=0;i<participantsAddress.length;i++){
+      address _receiver = address(participantsAddress[i]);
+      if(_didRefund[_receiver]== false){
+        _didRefund[_receiver] = true;
+        uint256 _amount = collaborations[_receiver].mul(poolInformation.presaleRate);    
+        _amount=_amount.div(10**18);
+        projectToken.transfer(_receiver, _amount);
+        break;
+      }
+      count++;
+    }
+    assert(count<participantsAddress.length);
+    
+  }
   function endPool()
     external
     override
@@ -187,7 +228,7 @@ contract Pool is IPool, Whitelist {
     payable(admin).transfer(toAdminETHAmount);      
     uint256 rest=_weiRaised.sub(toAdminETHAmount);
     // send ETH and Token back to the pool owner
-    dexETHAmount=poolInformation.hardCap.mul(poolInformation.dexCapPercent).div(100);
+    dexETHAmount=poolInformation.hardCap.mul(poolInformation.dexCapPercent).mul(poolInformation.presaleRate).div(poolInformation.dexRate).div(100);
     if(dexETHAmount>=rest){
       dexETHAmount=rest;      
     }else{     
