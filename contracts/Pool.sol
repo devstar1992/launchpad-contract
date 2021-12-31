@@ -8,6 +8,7 @@ import "./IPool.sol";
 import "./Validations.sol";
 import "./Whitelist.sol";
 import "./IPancakeRouter02.sol";
+import "./PoolLibrary.sol";
 contract Pool is IPool, Whitelist {
   using SafeMath for uint256;
   using SafeMath for uint16;
@@ -36,9 +37,9 @@ contract Pool is IPool, Whitelist {
     override
     _onlyFactory 
   {
-    _preValidatePoolCreation(_pool, _poolOwner, _poolPercentFee);
+    PoolLibrary._preValidatePoolCreation(_pool, _poolOwner, _poolPercentFee);
     poolInformation = _pool;
-    _preValidatePoolDetails(_details);
+    PoolLibrary._preValidatePoolDetails(_details);
     poolDetails=_details;
     poolOwner=_poolOwner;
     admin=_admin;
@@ -71,6 +72,13 @@ contract Pool is IPool, Whitelist {
     _;
   }
 
+  modifier _poolIsReadyCancel(PoolModel storage _pool, PoolDetails storage _poolDetails) {
+    require(
+      _poolDetails.endDateTime >= block.timestamp && _pool.status!= IPool.PoolStatus.Cancelled && _pool.status!= IPool.PoolStatus.Ended && _pool.status!= IPool.PoolStatus.Finished,
+      "not started!"
+    );
+    _;
+  }
   modifier _poolIsReadyEnd(PoolModel storage _pool, PoolDetails storage _poolDetails) {
     require(
       _poolDetails.endDateTime <= block.timestamp && _pool.status!= IPool.PoolStatus.Ended && _pool.status!= IPool.PoolStatus.Cancelled,
@@ -91,20 +99,20 @@ contract Pool is IPool, Whitelist {
     uint256 _beforeBalance = _weiRaised;
 
     uint256 sum = _weiRaised + msg.value;
-    require(sum < _hardCap, "hardCap!");
+    require(sum <= _hardCap, "hardCap!");
     require(sum > _beforeBalance, "hardCap overflow!");
     _;
   }
 
   modifier _minAllocationNotPassed(uint256 _minAllocationPerUser) {
-    require(_minAllocationPerUser < msg.value, "Less!");
+    require(_minAllocationPerUser <= msg.value, "Less!");
     _;
   }
 
-  modifier _maxAllocationNotPassed(uint256 _maxAllocationPerUser) {
-    collaborations[msg.sender] += msg.value;
+  modifier _maxAllocationNotPassed(uint256 _maxAllocationPerUser, address sender) {
+    uint256 aa=collaborations[sender] + msg.value;
 
-    require(collaborations[msg.sender] < _maxAllocationPerUser, "More!");
+    require(aa <= _maxAllocationPerUser, "More!");
     _;
   }
 
@@ -113,10 +121,11 @@ contract Pool is IPool, Whitelist {
     _;
   }
 
-  function updateExtraData(bytes32 _extraData)
+  function updateExtraData(string memory _extraData)
     external
     override    
     _onlyFactory
+    _poolIsReadyCancel(poolInformation, poolDetails)
   {
     poolDetails.extraData = _extraData;  
     emit LogPoolExtraData(_extraData);
@@ -136,6 +145,7 @@ contract Pool is IPool, Whitelist {
     external
     override
     _onlyFactory
+    _poolIsReadyCancel(poolInformation, poolDetails)
   {
     addToWhitelist(whitelistedAddresses);
   }
@@ -148,14 +158,14 @@ contract Pool is IPool, Whitelist {
     _onlyWhitelisted(sender)
     _poolIsOngoing(poolInformation, poolDetails)
     _minAllocationNotPassed(poolDetails.minAllocationPerUser)
-    _maxAllocationNotPassed(poolDetails.maxAllocationPerUser)
+    _maxAllocationNotPassed(poolDetails.maxAllocationPerUser, sender)
     _hardCapNotPassed(poolInformation.hardCap)
   {
     uint256 _amount = msg.value;
 
     _increaseRaisedWEI(_amount);
-    _addToParticipants(msg.sender);
-    emit LogDeposit(msg.sender, _amount);
+    _addToParticipants(sender);
+    emit LogDeposit(sender, _amount);
   }
 
   function startPool()
@@ -172,14 +182,17 @@ contract Pool is IPool, Whitelist {
     external
     override
     _onlyFactory
+    _poolIsReadyCancel(poolInformation, poolDetails) 
   {
+    projectToken = IERC20Metadata(poolInformation.projectTokenAddress);
     for(uint i=0;i<participantsAddress.length;i++){
-      uint refund=collaborations[address(participantsAddress[i])];
+      uint256 refund=collaborations[address(participantsAddress[i])];
       collaborations[address(participantsAddress[i])]=0;
       address addr = participantsAddress[i];
       payable(addr).transfer(refund);      
     }
     poolInformation.status=PoolStatus.Cancelled;
+    projectToken.transfer(address(poolOwner), projectToken.balanceOf(address(this)));
     emit LogPoolStatusChanged(uint(PoolStatus.Cancelled));
   }
 
@@ -213,16 +226,7 @@ contract Pool is IPool, Whitelist {
     _poolIsReadyEnd(poolInformation, poolDetails)    
   {
     projectToken = IERC20Metadata(poolInformation.projectTokenAddress);
-    //distribute the token
-    for(uint i=0;i<participantsAddress.length;i++){
-      address _receiver = address(participantsAddress[i]);
-      if(_didRefund[_receiver]== false){
-        _didRefund[_receiver] = true;
-        uint256 _amount = collaborations[_receiver].mul(poolInformation.presaleRate);    
-        _amount=_amount.div(10**18);
-        projectToken.transfer(_receiver, _amount);
-      }
-    }
+
     //pay for the project owner
     uint256 toAdminETHAmount=_weiRaised.mul(poolPercentFee).div(100);
     payable(admin).transfer(toAdminETHAmount);      
@@ -263,44 +267,25 @@ contract Pool is IPool, Whitelist {
     );
   }
 
-  function _preValidatePoolCreation(PoolModel memory _pool, address _poolOwner, uint8 _poolPercentFee) private pure {
-    require(_pool.hardCap > 0, "hardCap > 0");
-    require(_pool.softCap > 0, "softCap > 0");
-    require(_pool.softCap < _pool.hardCap, "softCap < hardCap");
-    require(
-      address(_poolOwner) != address(0),
-      "Owner is a zero address!"
-    );
-    require(_pool.dexCapPercent > 50 && _pool.dexCapPercent < 100, "dexCapPercent is 51~99%");
-    require(_pool.dexRate > 0, "dexRate > 0!");
-    require(_pool.presaleRate > _pool.dexRate, "presaleRate > dexRate!");
-    require(_poolPercentFee > 0 && _poolPercentFee<100, "percentFee!");
+
+ function status() 
+    external override view
+    returns (IPool.PoolStatus)
+  {
+    return poolInformation.status;
   }
 
-  function _preValidatePoolDetails(PoolDetails memory _poolDetails) private view {  
-    require(
-      //solhint-disable-next-line not-rely-on-time
-      _poolDetails.startDateTime > block.timestamp,"startDate fail!"
-    );
-    require(
-      //solhint-disable-next-line not-rely-on-time
-      _poolDetails.endDateTime > block.timestamp,"endDate fail!"
-    ); //TODO how much in the future?
-    require(
-      //solhint-disable-next-line not-rely-on-time
-      _poolDetails.startDateTime < _poolDetails.endDateTime,"start<end!"
-    );
-    require(_poolDetails.minAllocationPerUser > 0);
-    require(
-      _poolDetails.minAllocationPerUser < _poolDetails.maxAllocationPerUser,"min<max"
-    );
-  
+  function endDateTime() 
+    external override view
+    returns (uint256)
+  {
+    return poolDetails.endDateTime;
   }
 
   function _increaseRaisedWEI(uint256 _amount) private {
     require(_amount > 0, "No WEI found!");
 
-    _weiRaised =_weiRaised.add(msg.value);
+    _weiRaised =_weiRaised.add(_amount);
 
     if(_weiRaised==poolInformation.hardCap){
       poolInformation.status=PoolStatus.Finished;
@@ -314,7 +299,7 @@ contract Pool is IPool, Whitelist {
   }
 
   function _didAlreadyParticipated(address _address)
-    private
+    public
     view
     returns (bool isIt)
   {

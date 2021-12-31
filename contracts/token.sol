@@ -706,7 +706,7 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
     function _beforeTokenTransfer(address from, address to, uint256 amount) internal virtual { }
 }
 
-contract NewCowrieToken is ERC20("New Cowrie Token", "NewCowrie"),  Ownable {
+contract NewCowrieToken is ERC20("Test Toknen2", "TTK2"),  Ownable {
     using SafeMath for uint256;
     uint256 CAP = 20*10**9;
     uint256 TOTALSUPPLY = CAP.mul(10**9);

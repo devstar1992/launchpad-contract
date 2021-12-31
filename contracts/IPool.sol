@@ -3,7 +3,7 @@ pragma solidity 0.8.0;
 
 interface IPool {
   event LogPoolKYCUpdate(bool kyc);
-  event LogPoolExtraData(bytes32 indexed _extraData);
+  event LogPoolExtraData(string indexed _extraData);
   event LogDeposit(address indexed participant, uint256 amount);
   event LogPoolStatusChanged(uint256 status);  
 
@@ -24,7 +24,7 @@ interface IPool {
     uint256 minAllocationPerUser;
     uint256 maxAllocationPerUser;    
     uint8 dexLockup;
-    bytes32 extraData;
+    string extraData;
     bool refund;
     bool whitelistable;
   }
@@ -46,9 +46,10 @@ interface IPool {
     Ended,
     Cancelled
   }
+
   function setPoolModel(PoolModel calldata _pool, PoolDetails calldata _details, address _adminOwner, address _poolOwner, uint8 _poolETHFee)
     external;
-  function updateExtraData(bytes32 _detailedPoolInfo) external;
+  function updateExtraData(string memory _detailedPoolInfo) external;
   function updateKYCStatus(bool _kyc) external;
   function addAddressesToWhitelist(address[] calldata whitelistedAddresses) external;
 
@@ -58,5 +59,6 @@ interface IPool {
   function refundPool() external;
   function endPool() external;
   function addLiquidityDex() external;
-
+  function status() external view returns (PoolStatus);
+  function endDateTime()  external view returns (uint256);
 }

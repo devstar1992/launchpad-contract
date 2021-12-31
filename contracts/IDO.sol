@@ -16,6 +16,7 @@ contract IDO is Ownable {
   address[] public poolAddresses;
   uint256 public poolFixedFee;
   uint8 public poolPercentFee;
+  uint8 public poolTokenPercentFee;
   mapping(address => address) public poolOwners;
   struct PoolModel {  
     uint256 hardCap; // how much project wants to raise
@@ -35,12 +36,12 @@ contract IDO is Ownable {
     bool whitelistable;
   }
 
-  event LogPoolCreated(address indexed poolOwner, address pool);
+  event LogPoolCreated(address poolOwner, address pool);
   event LogPoolKYCUpdate(address pool, bool kyc);
-  event LogPoolExtraData(address pool, bytes32 indexed _extraData);
-  event LogDeposit(address pool, address indexed participant, uint256 amount);
+  event LogPoolExtraData(address pool, string _extraData);
+  event LogDeposit(address pool, address participant, uint256 amount);
   event LogPoolStatusChanged(address pool, uint256 status);  
-  event LogFeeChanged(uint256 poolFixedFee, uint8 poolPercentFee);  
+  event LogFeeChanged(uint256 poolFixedFee, uint8 poolPercentFee, uint8 poolTokenPercentFee);  
   event LogPoolRemoved(address pool);  
   event LogAddressWhitelisted(address pool, address[] whitelistedAddresses);
 
@@ -64,7 +65,7 @@ contract IDO is Ownable {
     PoolModel calldata model,
     PoolDetails calldata details,   
     address _projectTokenAddress,
-    bytes32 _extraData
+    string memory _extraData
   )
     external
     payable
@@ -91,7 +92,7 @@ contract IDO is Ownable {
       extraData:_extraData,
       refund:details.refund,
       whitelistable:details.whitelistable
-    }), owner(), poolPercentFee);
+    }), owner(), poolPercentFee, poolTokenPercentFee);
     payable(owner()).transfer(msg.value);
     
     poolAddresses.push(poolAddress);
@@ -99,19 +100,22 @@ contract IDO is Ownable {
     emit LogPoolCreated(msg.sender, poolAddress);
   }
 
-  function setAdminFee(uint256 _poolFixedFee, uint8 _poolPercentFee)
+  function setAdminFee(uint256 _poolFixedFee, uint8 _poolPercentFee, uint8 _poolTokenPercentFee)
   public
   onlyOwner()
   {
     poolFixedFee=_poolFixedFee;
     poolPercentFee=_poolPercentFee;
-    emit LogFeeChanged(poolFixedFee, poolPercentFee);
+    poolTokenPercentFee=_poolTokenPercentFee;
+    emit LogFeeChanged(poolFixedFee, poolPercentFee, poolTokenPercentFee);
   }
 
   function removePool(address pool)
     external
     onlyOwner()
   {
+
+    IPool(pool).cancelPool(); 
     for (uint index=0; index<poolAddresses.length; index++) {
       if(poolAddresses[uint(index)]==pool){
         for (uint i = index; i<poolAddresses.length-1; i++){
@@ -124,7 +128,7 @@ contract IDO is Ownable {
     emit LogPoolRemoved(pool);
   }
 
-  function updateExtraData(address _pool, bytes32 _extraData)
+  function updateExtraData(address _pool, string memory _extraData)
     external
     _onlyPoolOwner(_pool, msg.sender)
   {
@@ -159,7 +163,6 @@ contract IDO is Ownable {
 
   function startPool(address _pool)
     external
-    onlyOwner()
   {
     IPool(_pool).startPool(); 
     emit LogPoolStatusChanged(_pool, uint(IPool.PoolStatus.Inprogress));
@@ -174,14 +177,12 @@ contract IDO is Ownable {
 
   function refundPool(address _pool)
     external
-    onlyOwner()
   {
     IPool(_pool).refundPool(); 
   }
 
   function endPool(address _pool)
     external
-    onlyOwner()
   {
     IPool(_pool).endPool(); 
     emit LogPoolStatusChanged(_pool, uint(IPool.PoolStatus.Ended));
@@ -189,7 +190,6 @@ contract IDO is Ownable {
 
   function addLiquidityDex(address _pool)
     external    
-    onlyOwner()
   {
     IPool(_pool).addLiquidityDex(); 
   }
