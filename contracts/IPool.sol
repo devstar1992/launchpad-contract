@@ -25,7 +25,7 @@ interface IPool {
     uint256 maxAllocationPerUser;    
     uint8 dexLockup;
     string extraData;
-    bool refund;
+    // bool refund;
     bool whitelistable;
   }
 
@@ -61,4 +61,5 @@ interface IPool {
   function addLiquidityDex() external;
   function status() external view returns (PoolStatus);
   function endDateTime()  external view returns (uint256);
+  function startDateTime()  external view returns (uint256);
 }

@@ -1,5 +1,6 @@
 //SPDX-License-Identifier: MIT
-pragma solidity 0.8.0;
+pragma solidity >=0.8.0;
+
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -32,7 +33,7 @@ contract IDO is Ownable {
     uint256 minAllocationPerUser;
     uint256 maxAllocationPerUser;    
     uint8 dexLockup;
-    bool refund;
+    // bool refund;
     bool whitelistable;
   }
 
@@ -90,7 +91,7 @@ contract IDO is Ownable {
       maxAllocationPerUser:details.maxAllocationPerUser,
       dexLockup:details.dexLockup,
       extraData:_extraData,
-      refund:details.refund,
+      // refund:details.refund,
       whitelistable:details.whitelistable
     }), owner(), poolPercentFee, poolTokenPercentFee);
     payable(owner()).transfer(msg.value);
@@ -114,14 +115,19 @@ contract IDO is Ownable {
     external
     onlyOwner()
   {
-
-    IPool(pool).cancelPool(); 
+    try IPool(pool).status() returns (IPool.PoolStatus status) {
+      if(status!=IPool.PoolStatus.Cancelled && status!=IPool.PoolStatus.Finished && status!=IPool.PoolStatus.Ended)
+        IPool(pool).cancelPool(); 
+    } catch {
+    }
+    
     for (uint index=0; index<poolAddresses.length; index++) {
       if(poolAddresses[uint(index)]==pool){
         for (uint i = index; i<poolAddresses.length-1; i++){
             poolAddresses[i] = poolAddresses[i+1];
         }
         delete poolAddresses[poolAddresses.length-1];
+        poolAddresses.pop();
         break;
       }
     }

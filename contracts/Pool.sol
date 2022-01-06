@@ -74,8 +74,8 @@ contract Pool is IPool, Whitelist {
 
   modifier _poolIsReadyCancel(PoolModel storage _pool, PoolDetails storage _poolDetails) {
     require(
-      _poolDetails.endDateTime >= block.timestamp && _pool.status!= IPool.PoolStatus.Cancelled && _pool.status!= IPool.PoolStatus.Ended && _pool.status!= IPool.PoolStatus.Finished,
-      "not started!"
+      _pool.status!= IPool.PoolStatus.Cancelled && _pool.status!= IPool.PoolStatus.Ended && _pool.status!= IPool.PoolStatus.Finished,
+      "already cancelled!"
     );
     _;
   }
@@ -241,10 +241,10 @@ contract Pool is IPool, Whitelist {
     dexTokenAmount=dexETHAmount.mul(poolInformation.dexRate).div(10**18); 
     //refund to the pool owner
     uint256 tokenRest=projectToken.balanceOf(address(this)).sub(dexTokenAmount);
-    if(poolDetails.refund==true)
+    // if(poolDetails.refund==true)
       projectToken.transfer(address(poolOwner), tokenRest);
-    else
-      projectToken.transfer(address(0), tokenRest);
+    // else
+    //   projectToken.transfer(address(0), tokenRest);
     poolInformation.status=PoolStatus.Ended;
     emit LogPoolStatusChanged(uint(PoolStatus.Ended));
   }
@@ -280,6 +280,13 @@ contract Pool is IPool, Whitelist {
     returns (uint256)
   {
     return poolDetails.endDateTime;
+  }
+
+  function startDateTime() 
+    external override view
+    returns (uint256)
+  {
+    return poolDetails.startDateTime;
   }
 
   function _increaseRaisedWEI(uint256 _amount) private {
