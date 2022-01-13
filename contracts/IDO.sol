@@ -15,9 +15,9 @@ contract IDO is Ownable {
 
 
   address[] public poolAddresses;
-  uint256 public poolFixedFee;
-  uint8 public poolPercentFee;
-  uint8 public poolTokenPercentFee;
+  uint256 public poolFixedFee=0;
+  uint8 public poolPercentFee=0;
+  uint8 public poolTokenPercentFee=0;
   mapping(address => address) public poolOwners;
   struct PoolModel {  
     uint256 hardCap; // how much project wants to raise
@@ -32,7 +32,7 @@ contract IDO is Ownable {
     uint256 endDateTime;
     uint256 minAllocationPerUser;
     uint256 maxAllocationPerUser;    
-    uint8 dexLockup;
+    uint16 dexLockup;
     // bool refund;
     bool whitelistable;
   }
@@ -94,7 +94,8 @@ contract IDO is Ownable {
       // refund:details.refund,
       whitelistable:details.whitelistable
     }), owner(), poolPercentFee, poolTokenPercentFee);
-    payable(owner()).transfer(msg.value);
+    if(msg.value>0)
+      payable(owner()).transfer(msg.value);
     
     poolAddresses.push(poolAddress);
     poolOwners[poolAddress]=msg.sender;
@@ -167,12 +168,6 @@ contract IDO is Ownable {
     emit LogDeposit(_pool, msg.sender, msg.value);
   }
 
-  function startPool(address _pool)
-    external
-  {
-    IPool(_pool).startPool(); 
-    emit LogPoolStatusChanged(_pool, uint(IPool.PoolStatus.Inprogress));
-  }
   function cancelPool(address _pool)
     external
     _onlyPoolOwner(_pool, msg.sender)
@@ -181,23 +176,31 @@ contract IDO is Ownable {
     emit LogPoolStatusChanged(_pool, uint(IPool.PoolStatus.Cancelled));
   }
 
-  function refundPool(address _pool)
+  function claimToken(address _pool)
     external
   {
-    IPool(_pool).refundPool(); 
+    IPool(_pool).claimToken(msg.sender); 
   }
+
+  function refund(address _pool)
+    external
+  {
+    IPool(_pool).refund(msg.sender); 
+  }
+
 
   function endPool(address _pool)
     external
+    _onlyPoolOwner(_pool, msg.sender)
   {
     IPool(_pool).endPool(); 
     emit LogPoolStatusChanged(_pool, uint(IPool.PoolStatus.Ended));
   }
 
-  function addLiquidityDex(address _pool)
+  function unlockLiquidityDex(address _pool)
     external    
   {
-    IPool(_pool).addLiquidityDex(); 
+    IPool(_pool).unlockLiquidityDex(); 
   }
 
 }

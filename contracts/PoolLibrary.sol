@@ -13,7 +13,7 @@ library PoolLibrary {
   function _preValidatePoolDetails(IPool.PoolDetails memory _poolDetails) public view {  
     require(
       //solhint-disable-next-line not-rely-on-time
-      _poolDetails.startDateTime > block.timestamp,"startDate fail!"
+      _poolDetails.startDateTime >= block.timestamp,"startDate fail!"
     );
     require(
       //solhint-disable-next-line not-rely-on-time
@@ -37,9 +37,9 @@ library PoolLibrary {
       address(_poolOwner) != address(0),
       "Owner is a zero address!"
     );
-    require(_pool.dexCapPercent > 50 && _pool.dexCapPercent < 100, "dexCapPercent is 51~99%");
+    require(_pool.dexCapPercent >= 51 && _pool.dexCapPercent < 100, "dexCapPercent is 51~99%");
     require(_pool.dexRate > 0, "dexRate > 0!");
     require(_pool.presaleRate > _pool.dexRate, "presaleRate > dexRate!");
-    require(_poolPercentFee > 0 && _poolPercentFee<100, "percentFee!");
+    require(_poolPercentFee >= 0 && _poolPercentFee<100, "percentFee!");
   }
 }

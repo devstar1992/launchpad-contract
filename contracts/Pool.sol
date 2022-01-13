@@ -8,6 +8,8 @@ import "./IPool.sol";
 import "./Validations.sol";
 import "./Whitelist.sol";
 import "./IPancakeRouter02.sol";
+import "./IPancakeFactory.sol";
+import "./IPancakePair.sol";
 import "./PoolLibrary.sol";
 contract Pool is IPool, Whitelist {
   using SafeMath for uint256;
@@ -23,10 +25,7 @@ contract Pool is IPool, Whitelist {
   mapping(address => uint256) public collaborations;
   uint256 public _weiRaised = 0;
   mapping(address => bool) public _didRefund;
-  uint256 private dexETHAmount;
-  uint256 private dexTokenAmount;
   uint8 public  poolPercentFee;
-  
   constructor() {
       factory = msg.sender;
   }
@@ -54,8 +53,7 @@ contract Pool is IPool, Whitelist {
     );
     _;
   }
-  modifier _poolIsOngoing(PoolModel storage _pool, PoolDetails storage _poolDetails) {
-    require(_pool.status == PoolStatus.Inprogress, "not open!");
+  modifier _poolIsOngoing(PoolModel storage _pool, PoolDetails storage _poolDetails) {   
     // solhint-disable-next-line not-rely-on-time
     require(_poolDetails.startDateTime <= block.timestamp, "not started");
     // solhint-disable-next-line not-rely-on-time
@@ -64,30 +62,43 @@ contract Pool is IPool, Whitelist {
     _;
   }
 
-  modifier _poolIsReadyStart(PoolModel storage _pool, PoolDetails storage _poolDetails) {
-    require(
-      _poolDetails.startDateTime <= block.timestamp && _pool.status!= IPool.PoolStatus.Cancelled && _pool.status!= IPool.PoolStatus.Ended && _pool.status!= IPool.PoolStatus.Finished,
-      "not started!"
-    );
-    _;
-  }
 
-  modifier _poolIsReadyCancel(PoolModel storage _pool, PoolDetails storage _poolDetails) {
+
+  modifier _poolIsReadyUpdate(PoolModel storage _pool, PoolDetails storage _poolDetails) {
     require(
-      _pool.status!= IPool.PoolStatus.Cancelled && _pool.status!= IPool.PoolStatus.Ended && _pool.status!= IPool.PoolStatus.Finished,
+      _pool.status!= IPool.PoolStatus.Cancelled && _pool.status!= IPool.PoolStatus.Ended,
       "already cancelled!"
     );
     _;
   }
+
+  modifier _poolIsCancelled(PoolModel storage _pool, PoolDetails storage _poolDetails) {
+    require(
+      (_pool.status== IPool.PoolStatus.Cancelled || 
+      (_pool.status== IPool.PoolStatus.Inprogress || _pool.status== IPool.PoolStatus.Finished) 
+      && _poolDetails.endDateTime+7 days<= block.timestamp),
+      "not cancelled!"
+    );
+    _;
+  }
+
   modifier _poolIsReadyEnd(PoolModel storage _pool, PoolDetails storage _poolDetails) {
     require(
-      _poolDetails.endDateTime <= block.timestamp && _pool.status!= IPool.PoolStatus.Ended && _pool.status!= IPool.PoolStatus.Cancelled,
+      ( _poolDetails.endDateTime <= block.timestamp && _pool.status== IPool.PoolStatus.Inprogress && poolInformation.softCap<=_weiRaised ) ||
+      _pool.status== IPool.PoolStatus.Finished,
       "not Ended!"
     );
     _;
   }
 
-  modifier _poolIsReadyLiquidity(PoolModel storage _pool, PoolDetails storage _poolDetails) {
+  modifier _poolIsEnded(PoolModel storage _pool, PoolDetails storage _poolDetails) {
+    require(
+      _pool.status== IPool.PoolStatus.Ended, "not Ended!"
+    );
+    _;
+  }
+
+  modifier _poolIsReadyUnlock(PoolModel storage _pool, PoolDetails storage _poolDetails) {
     require(
       _poolDetails.endDateTime+_poolDetails.dexLockup*1 days<= block.timestamp && _pool.status== IPool.PoolStatus.Ended,
       "lockup!"
@@ -125,7 +136,7 @@ contract Pool is IPool, Whitelist {
     external
     override    
     _onlyFactory
-    _poolIsReadyCancel(poolInformation, poolDetails)
+    _poolIsReadyUpdate(poolInformation, poolDetails)
   {
     poolDetails.extraData = _extraData;  
     emit LogPoolExtraData(_extraData);
@@ -145,7 +156,7 @@ contract Pool is IPool, Whitelist {
     external
     override
     _onlyFactory
-    _poolIsReadyCancel(poolInformation, poolDetails)
+    _poolIsReadyUpdate(poolInformation, poolDetails)
   {
     addToWhitelist(whitelistedAddresses);
   }
@@ -162,61 +173,49 @@ contract Pool is IPool, Whitelist {
     _hardCapNotPassed(poolInformation.hardCap)
   {
     uint256 _amount = msg.value;
-
+    poolInformation.status=PoolStatus.Inprogress;
     _increaseRaisedWEI(_amount);
     _addToParticipants(sender);
     emit LogDeposit(sender, _amount);
-  }
-
-  function startPool()
-    external
-    override
-    _onlyFactory
-    _poolIsReadyStart(poolInformation, poolDetails)    
-  {    
-    poolInformation.status=PoolStatus.Inprogress;
-    emit LogPoolStatusChanged(uint(PoolStatus.Inprogress));
   }
 
   function cancelPool()
     external
     override
     _onlyFactory
-    _poolIsReadyCancel(poolInformation, poolDetails) 
+    _poolIsReadyUpdate(poolInformation, poolDetails) 
   {
     projectToken = IERC20Metadata(poolInformation.projectTokenAddress);
-    for(uint i=0;i<participantsAddress.length;i++){
-      uint256 refund=collaborations[address(participantsAddress[i])];
-      collaborations[address(participantsAddress[i])]=0;
-      address addr = participantsAddress[i];
-      payable(addr).transfer(refund);      
-    }
     poolInformation.status=PoolStatus.Cancelled;
-    projectToken.transfer(address(poolOwner), projectToken.balanceOf(address(this)));
+    if(projectToken.balanceOf(address(this))>0)
+      projectToken.transfer(address(poolOwner), projectToken.balanceOf(address(this)));
     emit LogPoolStatusChanged(uint(PoolStatus.Cancelled));
   }
 
-  function refundPool()
+  function refund(address claimer)
     external
     override
     _onlyFactory
-    _poolIsReadyEnd(poolInformation, poolDetails)    
+    _poolIsCancelled(poolInformation, poolDetails)    
   {
-    projectToken = IERC20Metadata(poolInformation.projectTokenAddress);
-    //distribute the token
-    uint count=0;
-    for(uint i=0;i<participantsAddress.length;i++){
-      address _receiver = address(participantsAddress[i]);
-      if(_didRefund[_receiver]== false){
-        _didRefund[_receiver] = true;
-        uint256 _amount = collaborations[_receiver].mul(poolInformation.presaleRate);    
-        _amount=_amount.div(10**18);
-        projectToken.transfer(_receiver, _amount);
-        break;
-      }
-      count++;
-    }
-    assert(count<participantsAddress.length);
+    uint256 refund_amount=collaborations[claimer];
+    collaborations[claimer]=0;
+    if(refund_amount>0)
+      payable(claimer).transfer(refund_amount);
+    poolInformation.status=PoolStatus.Cancelled;
+  }
+
+  function claimToken(address claimer)
+    external
+    override
+    _onlyFactory
+    _poolIsEnded(poolInformation, poolDetails)    
+  {
+    projectToken = IERC20Metadata(poolInformation.projectTokenAddress);  
+    uint256 _amount = collaborations[claimer].mul(poolInformation.presaleRate).div(10**18); 
+    collaborations[claimer]=0;
+    if(_amount>0)
+        projectToken.transfer(claimer, _amount);
     
   }
   function endPool()
@@ -229,42 +228,59 @@ contract Pool is IPool, Whitelist {
 
     //pay for the project owner
     uint256 toAdminETHAmount=_weiRaised.mul(poolPercentFee).div(100);
-    payable(admin).transfer(toAdminETHAmount);      
+    if(toAdminETHAmount>0)
+      payable(admin).transfer(toAdminETHAmount);      
     uint256 rest=_weiRaised.sub(toAdminETHAmount);
     // send ETH and Token back to the pool owner
-    dexETHAmount=poolInformation.hardCap.mul(poolInformation.dexCapPercent).mul(poolInformation.presaleRate).div(poolInformation.dexRate).div(100);
+    uint256 dexETHAmount=poolInformation.hardCap.mul(poolInformation.dexCapPercent).div(100);
     if(dexETHAmount>=rest){
       dexETHAmount=rest;      
-    }else{     
-      payable(poolOwner).transfer(rest.sub(dexETHAmount));
+    }else{
+      uint256 _toPoolOwner=rest.sub(dexETHAmount);
+      if(_toPoolOwner>0)
+        payable(poolOwner).transfer(_toPoolOwner);
     }
-    dexTokenAmount=dexETHAmount.mul(poolInformation.dexRate).div(10**18); 
+    uint256 dexTokenAmount=dexETHAmount.mul(poolInformation.dexRate).div(10**18); 
     //refund to the pool owner
-    uint256 tokenRest=projectToken.balanceOf(address(this)).sub(dexTokenAmount);
+    uint256 tokenRest=projectToken.balanceOf(address(this)).sub(dexTokenAmount).sub(_weiRaised.mul(poolInformation.presaleRate).div(10**18));
+    // uint256 claimedToken=_weiRaised.mul(poolInformation.presaleRate).div(10**18)
     // if(poolDetails.refund==true)
+    if(tokenRest>0)
       projectToken.transfer(address(poolOwner), tokenRest);
     // else
     //   projectToken.transfer(address(0), tokenRest);
     poolInformation.status=PoolStatus.Ended;
+    
+    ///////////////////////////////////////////////////////////////
+    //When deploy on mainnet, upcomment 
+    // add the liquidity
+
+    // IPancakeRouter02 pancakeRouter = IPancakeRouter02(address(0x10ED43C718714eb63d5aA57B78B54704E256024E));    
+    // pancakeRouter.addLiquidityETH{value: dexETHAmount}(
+    //     poolInformation.projectTokenAddress,
+    //     dexTokenAmount,
+    //     0, 
+    //     0, 
+    //     address(this),
+    //     block.timestamp + 360
+    // );
+
     emit LogPoolStatusChanged(uint(PoolStatus.Ended));
   }
 
-  function addLiquidityDex()
+  function unlockLiquidityDex()
     external
     override
     _onlyFactory
-    _poolIsReadyLiquidity(poolInformation, poolDetails)   
+    _poolIsReadyUnlock(poolInformation, poolDetails)   
   {
-    IPancakeRouter02 pancakeRouter = IPancakeRouter02(address(0x10ED43C718714eb63d5aA57B78B54704E256024E));
-    // add the liquidity
-    pancakeRouter.addLiquidityETH{value: dexETHAmount}(
-        poolInformation.projectTokenAddress,
-        dexTokenAmount,
-        0, // slippage is unavoidable
-        0, // slippage is unavoidable
-        poolOwner,
-        block.timestamp + 360
-    );
+   
+    IPancakeFactory pancakeFactory = IPancakeFactory(address(0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73));
+    address LPAddress=pancakeFactory.getPair(poolInformation.projectTokenAddress, address(0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c));
+    IPancakePair pancakePair=IPancakePair(LPAddress);
+    uint LPBalance=pancakePair.balanceOf(address(this));
+    if(LPBalance>0)
+      pancakePair.transfer(poolOwner, LPBalance);
   }
 
 

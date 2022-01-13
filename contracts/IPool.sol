@@ -23,7 +23,7 @@ interface IPool {
     uint256 endDateTime;
     uint256 minAllocationPerUser;
     uint256 maxAllocationPerUser;    
-    uint8 dexLockup;
+    uint16 dexLockup;
     string extraData;
     // bool refund;
     bool whitelistable;
@@ -54,11 +54,11 @@ interface IPool {
   function addAddressesToWhitelist(address[] calldata whitelistedAddresses) external;
 
   function deposit(address sender) external payable;
-  function startPool() external;
   function cancelPool() external;
-  function refundPool() external;
+  function claimToken(address claimer) external;
+  function refund(address claimer) external;
   function endPool() external;
-  function addLiquidityDex() external;
+  function unlockLiquidityDex() external;
   function status() external view returns (PoolStatus);
   function endDateTime()  external view returns (uint256);
   function startDateTime()  external view returns (uint256);

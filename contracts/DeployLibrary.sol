@@ -29,12 +29,13 @@ library DeployLibrary {
     }
     IPool(poolAddress).setPoolModel(_pool, _details, _admin, msg.sender, _poolPercentFee);
     IERC20Metadata projectToken = IERC20Metadata(_pool.projectTokenAddress);
-    uint256 totalTokenAmount=_pool.hardCap.mul(_pool.presaleRate).add(_pool.hardCap.mul(_pool.presaleRate.mul(_pool.dexCapPercent))/100);
+    uint256 totalTokenAmount=_pool.hardCap.mul(_pool.presaleRate).add(_pool.hardCap.mul(_pool.dexRate.mul(_pool.dexCapPercent))/100);
     totalTokenAmount=totalTokenAmount.div(10**18);
-
-    projectToken.transferFrom(msg.sender, poolAddress, totalTokenAmount);
+    if(totalTokenAmount>0)
+      projectToken.transferFrom(msg.sender, poolAddress, totalTokenAmount);
     //pay for the project owner
-    projectToken.transferFrom(msg.sender, _admin, totalTokenAmount.mul(_poolTokenPercentFee)/100);
+    if(_poolTokenPercentFee>0)
+      projectToken.transferFrom(msg.sender, _admin, totalTokenAmount.mul(_poolTokenPercentFee)/100);
    return poolAddress;
   }
 
