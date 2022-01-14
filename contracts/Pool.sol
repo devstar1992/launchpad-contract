@@ -198,10 +198,11 @@ contract Pool is IPool, Whitelist {
     _onlyFactory
     _poolIsCancelled(poolInformation, poolDetails)    
   {
-    uint256 refund_amount=collaborations[claimer];
-    collaborations[claimer]=0;
-    if(refund_amount>0)
-      payable(claimer).transfer(refund_amount);
+
+    if(_didRefund[claimer]!=true && collaborations[claimer]>0){
+      _didRefund[claimer]=true;
+      payable(claimer).transfer(collaborations[claimer]);
+    }
     poolInformation.status=PoolStatus.Cancelled;
   }
 
@@ -213,9 +214,10 @@ contract Pool is IPool, Whitelist {
   {
     projectToken = IERC20Metadata(poolInformation.projectTokenAddress);  
     uint256 _amount = collaborations[claimer].mul(poolInformation.presaleRate).div(10**18); 
-    collaborations[claimer]=0;
-    if(_amount>0)
-        projectToken.transfer(claimer, _amount);
+    if(_didRefund[claimer]!=true && _amount>0){
+      _didRefund[claimer]=true;
+      projectToken.transfer(claimer, _amount);
+    }
     
   }
   function endPool()
