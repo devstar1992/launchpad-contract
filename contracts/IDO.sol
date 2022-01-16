@@ -186,6 +186,7 @@ contract IDO is Ownable {
     external
   {
     IPool(_pool).refund(msg.sender); 
+    emit LogPoolStatusChanged(_pool, uint(IPool.PoolStatus.Cancelled));
   }
 
 
