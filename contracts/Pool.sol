@@ -53,58 +53,7 @@ contract Pool is IPool, Whitelist {
     );
     _;
   }
-  modifier _poolIsOngoing(PoolModel storage _pool, PoolDetails storage _poolDetails) {   
-    // solhint-disable-next-line not-rely-on-time
-    require(_poolDetails.startDateTime <= block.timestamp, "not started");
-    // solhint-disable-next-line not-rely-on-time
-    require(_poolDetails.endDateTime >= block.timestamp, "end!");
-
-    _;
-  }
-
-
-
-  modifier _poolIsReadyUpdate(PoolModel storage _pool, PoolDetails storage _poolDetails) {
-    require(
-      _pool.status!= IPool.PoolStatus.Cancelled && _pool.status!= IPool.PoolStatus.Ended,
-      "already cancelled!"
-    );
-    _;
-  }
-
-  modifier _poolIsCancelled(PoolModel storage _pool, PoolDetails storage _poolDetails) {
-    require(
-      (_pool.status== IPool.PoolStatus.Cancelled || 
-      (_pool.status== IPool.PoolStatus.Inprogress || _pool.status== IPool.PoolStatus.Finished) 
-      && _poolDetails.endDateTime+7 days<= block.timestamp),
-      "not cancelled!"
-    );
-    _;
-  }
-
-  modifier _poolIsReadyEnd(PoolModel storage _pool, PoolDetails storage _poolDetails) {
-    require(
-      ( _poolDetails.endDateTime <= block.timestamp && _pool.status== IPool.PoolStatus.Inprogress && poolInformation.softCap<=_weiRaised ) ||
-      _pool.status== IPool.PoolStatus.Finished,
-      "not Ended!"
-    );
-    _;
-  }
-
-  modifier _poolIsEnded(PoolModel storage _pool, PoolDetails storage _poolDetails) {
-    require(
-      _pool.status== IPool.PoolStatus.Ended, "not Ended!"
-    );
-    _;
-  }
-
-  modifier _poolIsReadyUnlock(PoolModel storage _pool, PoolDetails storage _poolDetails) {
-    require(
-      _poolDetails.endDateTime+_poolDetails.dexLockup*1 days<= block.timestamp && _pool.status== IPool.PoolStatus.Ended,
-      "lockup!"
-    );
-    _;
-  }
+  
 
   modifier _hardCapNotPassed(uint256 _hardCap) {
     uint256 _beforeBalance = _weiRaised;
@@ -116,7 +65,7 @@ contract Pool is IPool, Whitelist {
   }
 
   modifier _minAllocationNotPassed(uint256 _minAllocationPerUser) {
-    require(_minAllocationPerUser <= msg.value, "Less!");
+    require(poolInformation.hardCap.sub(_weiRaised)<_minAllocationPerUser || _minAllocationPerUser <= msg.value, "Less!");
     _;
   }
 
@@ -136,8 +85,8 @@ contract Pool is IPool, Whitelist {
     external
     override    
     _onlyFactory
-    _poolIsReadyUpdate(poolInformation, poolDetails)
   {
+    PoolLibrary._poolIsReadyUpdate(poolInformation);
     poolDetails.extraData = _extraData;  
     emit LogPoolExtraData(_extraData);
   }
@@ -151,13 +100,30 @@ contract Pool is IPool, Whitelist {
     emit LogPoolKYCUpdate(_kyc);
   }
 
+  function updateTierStatus(PoolTier _tier)
+    external
+    override    
+    _onlyFactory
+  {
+    poolInformation.tier = _tier;    
+    emit LogPoolTierUpdate(uint8(_tier));
+  }
+
+  function updateAuditStatus(bool _audit)
+    external
+    override    
+    _onlyFactory
+  {
+    poolInformation.audit = _audit;    
+    emit LogPoolAuditUpdate(_audit);
+  }
 
   function addAddressesToWhitelist(address[] calldata whitelistedAddresses)
     external
     override
     _onlyFactory
-    _poolIsReadyUpdate(poolInformation, poolDetails)
   {
+    PoolLibrary._poolIsReadyUpdate(poolInformation);
     addToWhitelist(whitelistedAddresses);
   }
 
@@ -166,12 +132,12 @@ contract Pool is IPool, Whitelist {
     payable
     override
     _onlyFactory
-    _onlyWhitelisted(sender)
-    _poolIsOngoing(poolInformation, poolDetails)
+    _onlyWhitelisted(sender)    
     _minAllocationNotPassed(poolDetails.minAllocationPerUser)
     _maxAllocationNotPassed(poolDetails.maxAllocationPerUser, sender)
     _hardCapNotPassed(poolInformation.hardCap)
   {
+    PoolLibrary._poolIsOngoing(poolDetails);
     uint256 _amount = msg.value;
     poolInformation.status=PoolStatus.Inprogress;
     _increaseRaisedWEI(_amount);
@@ -182,9 +148,9 @@ contract Pool is IPool, Whitelist {
   function cancelPool()
     external
     override
-    _onlyFactory
-    _poolIsReadyUpdate(poolInformation, poolDetails) 
+    _onlyFactory    
   {
+    PoolLibrary._poolIsReadyUpdate(poolInformation);
     projectToken = IERC20Metadata(poolInformation.projectTokenAddress);
     poolInformation.status=PoolStatus.Cancelled;
     if(projectToken.balanceOf(address(this))>0)
@@ -196,9 +162,8 @@ contract Pool is IPool, Whitelist {
     external
     override
     _onlyFactory
-    _poolIsCancelled(poolInformation, poolDetails)    
   {
-
+    PoolLibrary._poolIsCancelled(poolInformation, poolDetails, _weiRaised);
     if(_didRefund[claimer]!=true && collaborations[claimer]>0){
       _didRefund[claimer]=true;
       payable(claimer).transfer(collaborations[claimer]);
@@ -210,8 +175,8 @@ contract Pool is IPool, Whitelist {
     external
     override
     _onlyFactory
-    _poolIsEnded(poolInformation, poolDetails)    
   {
+    PoolLibrary._poolIsEnded(poolInformation, poolDetails);
     projectToken = IERC20Metadata(poolInformation.projectTokenAddress);  
     uint256 _amount = collaborations[claimer].mul(poolInformation.presaleRate).div(10**18); 
     if(_didRefund[claimer]!=true && _amount>0){
@@ -224,8 +189,8 @@ contract Pool is IPool, Whitelist {
     external
     override
     _onlyFactory
-    _poolIsReadyEnd(poolInformation, poolDetails)    
   {
+    PoolLibrary._poolIsReadyEnd(poolInformation, poolDetails, _weiRaised);
     projectToken = IERC20Metadata(poolInformation.projectTokenAddress);
 
     //pay for the project owner
@@ -243,8 +208,13 @@ contract Pool is IPool, Whitelist {
         payable(poolOwner).transfer(_toPoolOwner);
     }
     uint256 dexTokenAmount=dexETHAmount.mul(poolInformation.dexRate).div(10**18); 
+    //pay to the admin owner
+    uint256 tokenToAdmin=projectToken.balanceOf(address(this)).sub(dexTokenAmount).sub(poolInformation.hardCap.mul(poolInformation.presaleRate).div(10**18));
+    if(tokenToAdmin>0){
+      projectToken.transfer(address(admin), tokenToAdmin);
+    }
     //refund to the pool owner
-    uint256 tokenRest=projectToken.balanceOf(address(this)).sub(dexTokenAmount).sub(_weiRaised.mul(poolInformation.presaleRate).div(10**18));
+    uint256 tokenRest=projectToken.balanceOf(address(this)).sub(dexTokenAmount).sub(_weiRaised.mul(poolInformation.presaleRate).div(10**18)).sub(tokenToAdmin);
     // uint256 claimedToken=_weiRaised.mul(poolInformation.presaleRate).div(10**18)
     // if(poolDetails.refund==true)
     if(tokenRest>0)
@@ -257,15 +227,16 @@ contract Pool is IPool, Whitelist {
     //When deploy on mainnet, upcomment 
     // add the liquidity
 
-    // IPancakeRouter02 pancakeRouter = IPancakeRouter02(address(0x10ED43C718714eb63d5aA57B78B54704E256024E));    
-    // pancakeRouter.addLiquidityETH{value: dexETHAmount}(
-    //     poolInformation.projectTokenAddress,
-    //     dexTokenAmount,
-    //     0, 
-    //     0, 
-    //     address(this),
-    //     block.timestamp + 360
-    // );
+    IPancakeRouter02 pancakeRouter = IPancakeRouter02(address(0x10ED43C718714eb63d5aA57B78B54704E256024E));    
+    (uint amountToken, , )=pancakeRouter.addLiquidityETH{value: dexETHAmount}(
+        poolInformation.projectTokenAddress,
+        dexTokenAmount,
+        0, 
+        0, 
+        address(this),
+        block.timestamp + 360
+    );
+    require(amountToken==dexTokenAmount, "remove tax");
 
     emit LogPoolStatusChanged(uint(PoolStatus.Ended));
   }
@@ -274,9 +245,8 @@ contract Pool is IPool, Whitelist {
     external
     override
     _onlyFactory
-    _poolIsReadyUnlock(poolInformation, poolDetails)   
   {
-   
+    PoolLibrary._poolIsReadyUnlock(poolInformation, poolDetails);
     IPancakeFactory pancakeFactory = IPancakeFactory(address(0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73));
     address LPAddress=pancakeFactory.getPair(poolInformation.projectTokenAddress, address(0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c));
     IPancakePair pancakePair=IPancakePair(LPAddress);

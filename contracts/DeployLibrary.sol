@@ -31,13 +31,16 @@ library DeployLibrary {
     IERC20Metadata projectToken = IERC20Metadata(_pool.projectTokenAddress);
     uint256 totalTokenAmount=_pool.hardCap.mul(_pool.presaleRate).add(_pool.hardCap.mul(_pool.dexRate.mul(_pool.dexCapPercent))/100);
     totalTokenAmount=totalTokenAmount.div(10**18);
+    totalTokenAmount=totalTokenAmount.add(totalTokenAmount.mul(_poolTokenPercentFee)/100);
     if(totalTokenAmount>0)
       projectToken.transferFrom(msg.sender, poolAddress, totalTokenAmount);
+    require(projectToken.balanceOf(poolAddress)==totalTokenAmount, "remove tax");
     //pay for the project owner
-    if(_poolTokenPercentFee>0)
-      projectToken.transferFrom(msg.sender, _admin, totalTokenAmount.mul(_poolTokenPercentFee)/100);
-   return poolAddress;
+    // if(_poolTokenPercentFee>0)
+    //   projectToken.transferFrom(msg.sender, _admin, totalTokenAmount.mul(_poolTokenPercentFee)/100);
+    return poolAddress;
   }
+  
 
  
 }

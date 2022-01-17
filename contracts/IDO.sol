@@ -15,7 +15,10 @@ contract IDO is Ownable {
 
 
   address[] public poolAddresses;
-  uint256 public poolFixedFee=0;
+  uint256 public poolFixedFeeForCommon=0;
+  uint256 public poolFixedFeeForGold=0;
+  uint256 public poolFixedFeeForPlatinum=0;
+  uint256 public poolFixedFeeForDiamond=0;
   uint8 public poolPercentFee=0;
   uint8 public poolTokenPercentFee=0;
   mapping(address => address) public poolOwners;
@@ -25,6 +28,7 @@ contract IDO is Ownable {
     uint256 presaleRate;
     uint8 dexCapPercent;
     uint256 dexRate;
+    uint8 tier;
   }
 
   struct PoolDetails {
@@ -39,16 +43,24 @@ contract IDO is Ownable {
 
   event LogPoolCreated(address poolOwner, address pool);
   event LogPoolKYCUpdate(address pool, bool kyc);
+  event LogPoolTierUpdate(address pool, uint8 tier);
+  event LogPoolAuditUpdate(address pool, bool audit);
   event LogPoolExtraData(address pool, string _extraData);
   event LogDeposit(address pool, address participant, uint256 amount);
   event LogPoolStatusChanged(address pool, uint256 status);  
-  event LogFeeChanged(uint256 poolFixedFee, uint8 poolPercentFee, uint8 poolTokenPercentFee);  
+  event LogFeeChanged(uint256 poolFixedFeeForCommon,
+  uint256 poolFixedFeeForGold,
+  uint256 poolFixedFeeForPlatinum,
+  uint256 poolFixedFeeForDiamond, uint8 poolPercentFee, uint8 poolTokenPercentFee);  
   event LogPoolRemoved(address pool);  
   event LogAddressWhitelisted(address pool, address[] whitelistedAddresses);
 
-  modifier _feeEnough() {
+  modifier _feeEnough(uint8 tier) {
     require(
-      msg.value >= poolFixedFee,
+      (msg.value >= poolFixedFeeForCommon && tier==0) || 
+      (msg.value >= poolFixedFeeForGold && tier==1) ||
+      (msg.value >= poolFixedFeeForPlatinum && tier==2) ||
+      (msg.value >= poolFixedFeeForDiamond && tier==3),
       "Not enough fee!"
     );
     _;
@@ -57,6 +69,13 @@ contract IDO is Ownable {
   modifier _onlyPoolOwner(address _pool, address _owner) {
     require(
       poolOwners[_pool] == _owner,
+      "Not Owner!"
+    );
+    _;
+  }
+  modifier _onlyPoolOwnerAndOwner(address _pool, address _owner) {
+    require(
+      poolOwners[_pool] == _owner || _owner==owner(),
       "Not Owner!"
     );
     _;
@@ -70,7 +89,7 @@ contract IDO is Ownable {
   )
     external
     payable
-    _feeEnough
+    _feeEnough(model.tier)
     returns (address poolAddress)
   {
     poolAddress=DeployLibrary.deployPool(
@@ -82,7 +101,9 @@ contract IDO is Ownable {
       dexCapPercent:model.dexCapPercent,
       dexRate:model.dexRate,     
       kyc:false,
-      status: IPool.PoolStatus(0)
+      audit:false,
+      status: IPool.PoolStatus(0),
+      tier: IPool.PoolTier(model.tier)
     }), 
     IPool.PoolDetails({
       startDateTime: details.startDateTime,
@@ -102,25 +123,33 @@ contract IDO is Ownable {
     emit LogPoolCreated(msg.sender, poolAddress);
   }
 
-  function setAdminFee(uint256 _poolFixedFee, uint8 _poolPercentFee, uint8 _poolTokenPercentFee)
+  function setAdminFee(uint256 _poolFixedFeeForCommon,
+  uint256 _poolFixedFeeForGold,
+  uint256 _poolFixedFeeForPlatinum,
+  uint256 _poolFixedFeeForDiamond,
+   uint8 _poolPercentFee, uint8 _poolTokenPercentFee)
   public
   onlyOwner()
   {
-    poolFixedFee=_poolFixedFee;
+    poolFixedFeeForCommon=_poolFixedFeeForCommon;
+    poolFixedFeeForGold=_poolFixedFeeForGold;
+    poolFixedFeeForPlatinum=_poolFixedFeeForPlatinum;
+    poolFixedFeeForDiamond=_poolFixedFeeForDiamond;
     poolPercentFee=_poolPercentFee;
     poolTokenPercentFee=_poolTokenPercentFee;
-    emit LogFeeChanged(poolFixedFee, poolPercentFee, poolTokenPercentFee);
+    emit LogFeeChanged(poolFixedFeeForCommon, poolFixedFeeForGold,
+    poolFixedFeeForPlatinum, poolFixedFeeForDiamond, poolPercentFee, poolTokenPercentFee);
   }
 
   function removePool(address pool)
     external
     onlyOwner()
   {
-    try IPool(pool).status() returns (IPool.PoolStatus status) {
-      if(status!=IPool.PoolStatus.Cancelled && status!=IPool.PoolStatus.Finished && status!=IPool.PoolStatus.Ended)
-        IPool(pool).cancelPool(); 
-    } catch {
-    }
+    // try IPool(pool).status() returns (IPool.PoolStatus status) {
+    //   if(status!=IPool.PoolStatus.Cancelled && status!=IPool.PoolStatus.Finished && status!=IPool.PoolStatus.Ended)
+    //     IPool(pool).cancelPool(); 
+    // } catch {
+    // }
     
     for (uint index=0; index<poolAddresses.length; index++) {
       if(poolAddresses[uint(index)]==pool){
@@ -151,6 +180,23 @@ contract IDO is Ownable {
     emit LogPoolKYCUpdate(_pool, _kyc);
   }
 
+  function updateTierStatus(address _pool, uint8 _tier)
+    external
+    onlyOwner()
+  {
+    IPool(_pool).updateTierStatus(IPool.PoolTier(_tier));  
+    emit LogPoolTierUpdate(_pool, _tier);
+  }
+
+
+  function updateAuditStatus(address _pool, bool _audit)
+    external
+    onlyOwner()
+  {
+    IPool(_pool).updateAuditStatus(_audit);  
+    emit LogPoolAuditUpdate(_pool, _audit);
+  }
+
 
   function addAddressesToWhitelist(address _pool, address[] calldata whitelistedAddresses)
     external
@@ -170,7 +216,7 @@ contract IDO is Ownable {
 
   function cancelPool(address _pool)
     external
-    _onlyPoolOwner(_pool, msg.sender)
+    _onlyPoolOwnerAndOwner(_pool, msg.sender)
   {
     IPool(_pool).cancelPool(); 
     emit LogPoolStatusChanged(_pool, uint(IPool.PoolStatus.Cancelled));
